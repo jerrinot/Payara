@@ -30,6 +30,8 @@ import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.annotation.PostConstruct;
@@ -40,11 +42,14 @@ import javax.naming.InitialContext;
 import javax.naming.NamingException;
 import org.glassfish.api.StartupRunLevel;
 import org.glassfish.api.admin.ServerEnvironment;
+import org.glassfish.api.deployment.DeploymentContext;
 import org.glassfish.api.event.EventListener;
 import org.glassfish.api.event.EventTypes;
 import org.glassfish.api.event.Events;
 import org.glassfish.hk2.runlevel.RunLevel;
 import org.glassfish.internal.api.ServerContext;
+import org.glassfish.internal.data.ApplicationInfo;
+import org.glassfish.internal.deployment.Deployment;
 import org.jvnet.hk2.annotations.Service;
 
 /**
@@ -66,6 +71,8 @@ public class HazelcastCore implements EventListener {
     private CachingProvider hazelcastCachingProvider;
     private boolean enabled;
     private String memberName;
+
+    private List<ClassLoader> appClassLoaders = new CopyOnWriteArrayList<ClassLoader>();
 
     @Inject
     Events events;
@@ -116,6 +123,14 @@ public class HazelcastCore implements EventListener {
                 enabled = true;
                 bootstrapHazelcast();
             }
+        } else if (event.is(Deployment.DEPLOYMENT_SUCCESS)) {
+            ApplicationInfo appInfo = (ApplicationInfo) event.hook();
+            ClassLoader appClassLoader = appInfo.getAppClassLoader();
+            appClassLoaders.add(appClassLoader);
+        } else if (event.is(Deployment.UNDEPLOYMENT_SUCCESS)) {
+            DeploymentContext appInfo = (DeploymentContext) event.hook();
+            ClassLoader appClassLoader = appInfo.getClassLoader();
+            appClassLoaders.remove(appClassLoader);
         }
     }
 
@@ -140,6 +155,7 @@ public class HazelcastCore implements EventListener {
     private Config buildConfiguration() {
         Config config = new Config();
 
+        config.setClassLoader(new SillyClassLoader(this.getClass().getClassLoader(), appClassLoaders));
         String hazelcastFilePath = "";
         URL serverConfigURL;
         try {
